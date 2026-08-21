@@ -1,0 +1,10 @@
+node_modules
+venv
+.env
+test_audio.wav
+data
+benchmark_results.json
+test_retrieval.py
+__pycache__
+package-lock.json
+bun.lockq
