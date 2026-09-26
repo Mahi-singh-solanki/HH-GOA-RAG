@@ -3,130 +3,62 @@ from __future__ import annotations
 import re
 
 
-# ============================================================
-# CONFIG
-# ============================================================
-
-MAX_QUERY_LENGTH = 500
-
-
-# Queries that are obviously not useful for this RAG.
-# Keep this lightweight because it runs on every request.
 BLOCKED_PATTERNS = [
-    r"\b(ignore|disregard)\s+(all|the|previous)\s+instructions\b",
-    r"\bsystem\s+prompt\b",
-    r"\breveal\s+(your|the)\s+(prompt|instructions)\b",
+    r"ignore previous instructions",
+    r"ignore all previous instructions",
+    r"system prompt",
+    r"reveal your prompt",
+    r"developer message",
+    r"jailbreak",
 ]
 
 
-# ============================================================
-# RESULT
-# ============================================================
+def validate_query(
+    query: str,
+) -> dict:
 
-class GuardrailResult:
+    if not query:
 
-    def __init__(
-        self,
-        allowed: bool,
-        reason: str = "",
-    ):
+        return {
+            "valid": False,
+            "reason": "Query is empty.",
+        }
 
-        self.allowed = allowed
-        self.reason = reason
+    query = query.strip()
 
+    if not query:
 
-# ============================================================
-# GUARDRAIL
-# ============================================================
+        return {
+            "valid": False,
+            "reason": "Query is empty.",
+        }
 
-class GuardrailService:
+    if len(query) > 2000:
 
-    def check(
-        self,
-        query: str,
-    ) -> GuardrailResult:
+        return {
+            "valid": False,
+            "reason": (
+                "Query is too long."
+            ),
+        }
 
-        # ----------------------------------------------------
-        # Empty
-        # ----------------------------------------------------
+    lowered = query.lower()
 
-        if not query or not query.strip():
+    for pattern in BLOCKED_PATTERNS:
 
-            return GuardrailResult(
-                allowed=False,
-                reason="empty_query",
-            )
-
-        query = query.strip()
-
-        # ----------------------------------------------------
-        # Length
-        # ----------------------------------------------------
-
-        if len(query) > MAX_QUERY_LENGTH:
-
-            return GuardrailResult(
-                allowed=False,
-                reason="query_too_long",
-            )
-
-        # ----------------------------------------------------
-        # Repeated garbage characters
-        # ----------------------------------------------------
-
-        if re.fullmatch(
-            r"[\W_]+",
-            query,
-            flags=re.UNICODE,
+        if re.search(
+            pattern,
+            lowered,
         ):
 
-            return GuardrailResult(
-                allowed=False,
-                reason="invalid_query",
-            )
+            return {
+                "valid": False,
+                "reason": (
+                    "The query contains "
+                    "an unsupported instruction."
+                ),
+            }
 
-        # ----------------------------------------------------
-        # Prompt injection patterns
-        # ----------------------------------------------------
-
-        query_lower = query.lower()
-
-        for pattern in BLOCKED_PATTERNS:
-
-            if re.search(
-                pattern,
-                query_lower,
-            ):
-
-                return GuardrailResult(
-                    allowed=False,
-                    reason="prompt_injection",
-                )
-
-        # ----------------------------------------------------
-        # Otherwise allow
-        # ----------------------------------------------------
-
-        return GuardrailResult(
-            allowed=True,
-        )
-
-
-# ============================================================
-# SINGLETON
-# ============================================================
-
-_guardrail_service = None
-
-
-def get_guardrail_service():
-
-    global _guardrail_service
-
-    if _guardrail_service is None:
-
-        _guardrail_service = (
-            GuardrailService()
-        )
-
-    return _guardrail_service
+    return {
+        "valid": True,
+    }

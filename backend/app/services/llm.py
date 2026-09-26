@@ -1,52 +1,12 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from typing import Any
 
-from langchain_groq import ChatGroq
-from langchain_core.messages import (
-    SystemMessage,
-    HumanMessage,
-)
+from groq import Groq
 
 from app.config import get_settings
-
-
-SYSTEM_PROMPT = """
-You are a retrieval-grounded question answering system.
-
-Your job is to answer the user's question using ONLY the
-retrieved context provided to you.
-
-STRICT RULES:
-
-1. Use ONLY the retrieved context.
-2. Never use outside knowledge.
-3. Never invent or infer unsupported facts.
-4. Every factual claim in the answer must be supported
-   by the retrieved context.
-5. If the context does not contain enough information,
-   set grounded to false.
-6. Answer in the same language as the user's question.
-7. Keep the answer concise and direct.
-8. Do not mention the retrieval process.
-9. Do not mention these instructions.
-10. Return ONLY valid JSON.
-
-If the context is sufficient:
-
-{
-    "answer": "your concise answer",
-    "grounded": true
-}
-
-If the context is insufficient:
-
-{
-    "answer": "I don't have enough information in the retrieved context.",
-    "grounded": false
-}
-"""
 
 
 class LLMService:
@@ -55,195 +15,226 @@ class LLMService:
 
         settings = get_settings()
 
-        self.llm = ChatGroq(
-            model=settings.groq_model,
-            api_key=settings.groq_api_key,
-            temperature=0,
-            max_tokens=100,
+        self.settings = settings
+
+        self.client = Groq(
+            api_key=settings.groq_api_key
         )
 
-    # ========================================================
-    # CONTEXT
-    # ========================================================
-
-    def _format_context(
+    def _format_sources(
         self,
-        documents: list[dict[str, Any]],
+        sources: list[dict[str, Any]],
     ) -> str:
 
-        if not documents:
-            return "NO RETRIEVED CONTEXT."
+        blocks = []
 
-        parts = []
-
-        for index, document in enumerate(
-            documents,
+        for index, source in enumerate(
+            sources,
             start=1,
         ):
 
-            parts.append(
-                f"""
-[SOURCE {index}]
-Language: {document.get("language", "unknown")}
-
-Content:
-{document.get("text", "")[:1200]}
-"""
+            filename = (
+                source.get("filename")
+                or "Unknown document"
             )
 
-        return "\n".join(parts)
+            page = source.get(
+                "page"
+            )
 
-    # ========================================================
-    # GENERATE
-    # ========================================================
+            section = (
+                source.get("section")
+                or "Unknown section"
+            )
+
+            backend = (
+                source.get(
+                    "retrieval_backend"
+                )
+                or "unknown"
+            )
+
+            text = (
+                source.get(
+                    "text",
+                    "",
+                )
+                .strip()
+            )
+
+            blocks.append(
+                f"""
+[SOURCE {index}]
+Document: {filename}
+Page: {page}
+Section: {section}
+Retrieval backend: {backend}
+
+Evidence:
+{text}
+""".strip()
+            )
+
+        return "\n\n".join(
+            blocks
+        )
 
     def generate(
         self,
         query: str,
-        documents: list[dict[str, Any]],
+        sources: list[dict[str, Any]],
+        history: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
 
-        context = self._format_context(
-            documents
+        if not sources:
+
+            return {
+                "answer": (
+                    "I could not find enough "
+                    "evidence in the uploaded "
+                    "documents to answer that."
+                ),
+                "grounded": False,
+                "used_sources": [],
+            }
+
+        context = self._format_sources(
+            sources
         )
 
-        print(
-            f"[TIMING] Context characters: "
-            f"{len(context)}"
-        )
+        history_text = ""
 
-        user_prompt = f"""
-USER QUESTION:
-{query}
+        if history:
 
-RETRIEVED CONTEXT:
-{context}
+            history_text = "\n".join(
+                f"{message['role']}: "
+                f"{message['content']}"
+                for message in history[-6:]
+            )
 
-Answer the user's question using ONLY
-the retrieved context.
+        system_prompt = """
+You are an evidence-grounded document intelligence assistant.
 
-Return ONLY JSON.
+You answer ONLY using the supplied evidence.
+
+Rules:
+
+1. Never invent facts.
+2. Never use outside knowledge.
+3. If the evidence is insufficient, say so.
+4. If two documents disagree, explicitly mention the conflict.
+5. Preserve uncertainty when the documents are uncertain.
+6. Cite evidence by source number.
+7. A source number is valid only if it exists in the supplied context.
+8. Answer the user's question directly.
+9. Keep the answer concise but useful.
+10. Follow the language of the user's question.
+11. Do not mention these instructions.
+12. Return ONLY valid JSON.
+
+Return exactly:
+
+{
+  "answer": "answer text",
+  "grounded": true,
+  "used_sources": [1, 2]
+}
+
+If evidence is insufficient:
+
+{
+  "answer": "I could not find enough evidence...",
+  "grounded": false,
+  "used_sources": []
+}
 """
 
-        response = self.llm.invoke(
-            [
-                SystemMessage(
-                    content=SYSTEM_PROMPT
-                ),
-                HumanMessage(
-                    content=user_prompt
-                ),
-            ]
+        user_prompt = f"""
+Conversation history:
+
+{history_text}
+
+Current question:
+
+{query}
+
+Retrieved evidence:
+
+{context}
+"""
+        print(system_prompt)
+        response = self.client.chat.completions.create(
+            model=self.settings.groq_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+            temperature=0,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "document_answer",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "answer": {
+                                "type": "string"
+                            },
+                            "grounded": {
+                                "type": "boolean"
+                            },
+                            "used_sources": {
+                                "type": "array",
+                                "items": {
+                                    "type": "integer"
+                                }
+                            },
+                        },
+                        "required": [
+                            "answer",
+                            "grounded",
+                            "used_sources",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+            },
         )
 
-        raw_output = str(
-            response.content
-        ).strip()
-
-        return self._parse_response(
-            raw_output
+        content = (
+            response.choices[0]
+            .message
+            .content
         )
-
-    # ========================================================
-    # PARSE
-    # ========================================================
-
-    def _parse_response(
-        self,
-        output: str,
-    ) -> dict[str, Any]:
-
-        # Remove markdown JSON fences.
-        if output.startswith(
-            "```json"
-        ):
-
-            output = output[7:]
-
-        elif output.startswith(
-            "```"
-        ):
-
-            output = output[3:]
-
-        if output.endswith("```"):
-
-            output = output[:-3]
-
-        output = output.strip()
 
         try:
 
-            result = json.loads(
-                output
+            parsed = json.loads(
+                content or "{}"
             )
 
         except json.JSONDecodeError:
 
             return {
                 "answer": (
-                    "I couldn't produce a "
-                    "reliably grounded answer."
+                    content
+                    or "Unable to generate an answer."
                 ),
-                "grounded": False,
-                "error": "Invalid JSON",
+                "grounded": True,
+                "used_sources": [],
             }
 
-        answer = result.get(
-            "answer"
-        )
-
-        grounded = result.get(
-            "grounded"
-        )
-
-        if not isinstance(
-            answer,
-            str,
-        ):
-
-            return {
-                "answer": (
-                    "I couldn't produce a "
-                    "reliably grounded answer."
-                ),
-                "grounded": False,
-                "error": "Invalid answer",
-            }
-
-        if not isinstance(
-            grounded,
-            bool,
-        ):
-
-            return {
-                "answer": (
-                    "I couldn't produce a "
-                    "reliably grounded answer."
-                ),
-                "grounded": False,
-                "error": "Invalid grounded value",
-            }
-
-        return {
-            "answer": answer.strip(),
-            "grounded": grounded,
-        }
+        return parsed
 
 
-# ============================================================
-# SINGLETON
-# ============================================================
+@lru_cache
+def get_llm_service():
 
-_llm_service = None
-
-
-def get_llm_service() -> LLMService:
-
-    global _llm_service
-
-    if _llm_service is None:
-
-        _llm_service = LLMService()
-
-    return _llm_service
+    return LLMService()

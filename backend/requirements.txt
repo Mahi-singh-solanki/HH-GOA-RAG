@@ -13,6 +13,9 @@ qdrant-client
 sentence-transformers
 transformers
 torch
+requests
+numpy
+
 
 rank-bm25
 
@@ -24,7 +27,13 @@ xai-sdk
 numpy
 pandas
 datasets
-
+pymupdf 
+pillow 
+pytesseract 
+python-docx
+python-pptx
+openpyxl
+pageindex>=0.2.10
 python-dotenv
 tenacity
 

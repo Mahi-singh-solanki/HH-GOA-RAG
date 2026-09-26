@@ -1,144 +1,83 @@
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+BASE_DIR = Path(__file__).resolve().parents[1]
+
+
 class Settings(BaseSettings):
-    """
-    Central application configuration.
 
-    Values are loaded from environment variables / .env.
-    """
+    app_name: str = "Intelligent Document Intelligence"
+    app_env: str = "development"
+    debug: bool = True
 
-    app_name: str = Field(
-        default="Voice RAG",
-        validation_alias="APP_NAME",
+    groq_api_key: str
+    groq_model: str = "openai/gpt-oss-120b"
+
+    sarvam_api_key: str | None = None
+    sarvam_stt_model: str = "saaras:v2.5"
+
+    qdrant_url: str = "local"
+    qdrant_api_key: str | None = None
+    document_qdrant_collection: str = "document_chunks"
+
+    embedding_model: str = (
+        "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    )
+    embedding_device: str = "cpu"
+
+    dense_top_k: int = 8
+    pageindex_max_sources: int = 8
+    max_context_chunks: int = 8
+    min_retrieval_score: float = 0.20
+
+    temperature: float = 0.0
+
+    pageindex_enabled: bool = True
+
+    pageindex_mode: str = "auto"
+
+    pageindex_api_key: str | None = None
+
+    pageindex_index_model: str = "groq/openai/gpt-oss-20b"
+    pageindex_chat_model: str = "groq/openai/gpt-oss-120b"
+
+    pageindex_storage_path: str = str(
+        BASE_DIR / "data" / "pageindex"
     )
 
-    app_env: str = Field(
-        default="development",
-        validation_alias="APP_ENV",
+    documents_dir: str = str(
+        BASE_DIR / "data" / "documents"
     )
 
-    debug: bool = Field(
-        default=False,
-        validation_alias="DEBUG",
+    qdrant_local_path: str = str(
+        BASE_DIR / "data" / "qdrant"
     )
 
-    groq_api_key: str = Field(
-        validation_alias="GROQ_API_KEY",
+    ocr_enabled: bool = True
+    ocr_language: str = "eng"
+
+    tesseract_cmd: str | None = None
+
+    max_upload_size_mb: int = 50
+
+    cors_origins: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173"
     )
 
-    groq_model: str = Field(
-        default="grok-4.5",
-        validation_alias="GROQ_MODEL",
-    )
-
-
-    sarvam_api_key: str = Field(
-        validation_alias="SARVAM_API_KEY",
-    )
-
-    sarvam_stt_model: str = Field(
-        default="saaras:v3",
-        validation_alias="SARVAM_STT_MODEL",
-    )
-
-
-    qdrant_url: str = Field(
-        default="http://localhost:6333",
-        validation_alias="QDRANT_URL",
-    )
-
-    qdrant_api_key: str | None = Field(
-        default=None,
-        validation_alias="QDRANT_API_KEY",
-    )
-
-    qdrant_collection: str = Field(
-        default="msmarco_xi",
-        validation_alias="QDRANT_COLLECTION",
-    )
-
-
-    embedding_model: str = Field(
-        default=(
-            "sentence-transformers/"
-            "paraphrase-multilingual-mpnet-base-v2"
-        ),
-        validation_alias="EMBEDDING_MODEL",
-    )
-
-    embedding_device: str = Field(
-        default="cpu",
-        validation_alias="EMBEDDING_DEVICE",
-    )
-
-
-    dense_top_k: int = Field(
-        default=20,
-        validation_alias="DENSE_TOP_K",
-    )
-
-    sparse_top_k: int = Field(
-        default=20,
-        validation_alias="SPARSE_TOP_K",
-    )
-
-    rrf_k: int = Field(
-        default=60,
-        validation_alias="RRF_K",
-    )
-
-    rerank_top_k: int = Field(
-        default=5,
-        validation_alias="RERANK_TOP_K",
-    )
-
-    min_retrieval_score: float = Field(
-        default=0.20,
-        validation_alias="MIN_RETRIEVAL_SCORE",
-    )
-
-    max_context_chunks: int = Field(
-        default=5,
-        validation_alias="MAX_CONTEXT_CHUNKS",
-    )
-
-    temperature: float = Field(
-        default=0.0,
-        validation_alias="TEMPERATURE",
-    )
-
-
-
-    host: str = Field(
-        default="0.0.0.0",
-        validation_alias="HOST",
-    )
-
-    port: int = Field(
-        default=8000,
-        validation_alias="PORT",
-    )
-
+    conversation_max_messages: int = 12
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False,
         extra="ignore",
     )
+    
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """
-    Cached settings instance.
-
-    This prevents repeatedly parsing environment variables
-    throughout the application.
-    """
-
     return Settings()
